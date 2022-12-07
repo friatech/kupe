@@ -1,12 +1,176 @@
 #!/usr/bin/env bash
 
-KUBE_HOME="$HOME/.kube"
+set -eou pipefail
 
-if [ -z "$1" ]
-then
-  ACTIVE_PROFILE=$(stat "$KUBE_HOME/config" | grep File | sed -s 's/.*config\.//g')
-  echo "Active profile: $ACTIVE_PROFILE"
-elif [ -f "$KUBE_HOME/config.$1" ];
-then
-  ln -f -s "$KUBE_HOME/config.$1" config
-fi
+VERSION="1.0"
+KUBE_HOME=${KUBE_HOME:-"$HOME/.kube"}
+CURRENT_PROFILE=""
+PREVIOUS_PROFILE=""
+
+fatal() {
+   echo >&2 "$1"
+   exit 1
+}
+
+add_profile() {
+  if [ -f "$1" ]; then
+    cp "$1" "$KUBE_HOME/config.$2"
+  else
+    fatal "Configuration file '$1' could not be found!"
+  fi
+}
+
+create_config_sym_link() {
+  if [ -f "$KUBE_HOME/config.$1" ]; then
+    ln -f -s "$KUBE_HOME/config.$1" "$KUBE_HOME/config"
+  fi
+}
+
+create_previous_sym_link() {
+  if [ -f "$KUBE_HOME/config.$1" ]; then
+    ln -f -s "$KUBE_HOME/config.$1" "$KUBE_HOME/prev"
+  fi
+}
+
+delete_profile() {
+
+  if [[ "$CURRENT_PROFILE" == "$1" ]]; then
+    rm -rf "$KUBE_HOME/config"
+  elif [[ "$PREVIOUS_PROFILE" == "$1" ]]; then
+    rm -rf "$KUBE_HOME/prev"
+  fi
+
+  if [[ -f "$KUBE_HOME/config.$1" ]]; then
+    rm -rf "$KUBE_HOME/config.$1"
+  fi
+}
+
+delete_current_profile() {
+  if [[ -n "$CURRENT_PROFILE" ]]; then
+    delete_profile "$CURRENT_PROFILE"
+  fi
+}
+
+get_current_profile() {
+  if [[ -f "$KUBE_HOME/config" ]]; then
+    CURRENT_PROFILE=$(stat "$KUBE_HOME/config" | grep File | sed -s 's/.*config\.//g')
+  fi
+}
+
+get_previous_profile() {
+  if [[ -f "$KUBE_HOME/prev" ]]; then
+    PREVIOUS_PROFILE=$(stat "$KUBE_HOME/prev" | grep File | sed -s 's/.*config\.//g')
+  fi
+}
+
+list_profiles() {
+  find "$KUBE_HOME" -type f -name "config\.*" | sed -s 's/.*config\.//g' | sort
+}
+
+rename_profile() {
+  if [[ -f "$KUBE_HOME/config.$1" && ! -f "$KUBE_HOME/config.$2" ]]; then
+    mv "$KUBE_HOME/config.$1" "$KUBE_HOME/config.$2"
+  fi
+
+  if [[ "$CURRENT_PROFILE" == "$1" ]]; then
+    create_config_sym_link "$2"
+  elif [[ "$PREVIOUS_PROFILE" == "$1" ]]; then
+    create_previous_sym_link "$2"
+  fi
+}
+
+rename_current_profile() {
+  if [[ -n "$CURRENT_PROFILE" ]]; then
+    rename_profile "$CURRENT_PROFILE" "$1"
+  fi
+}
+
+show_current_profile() {
+  if [[ -n "$CURRENT_PROFILE" ]]; then
+    echo "$CURRENT_PROFILE"
+  fi
+}
+
+show_version() {
+  echo "$VERSION"
+}
+
+show_usage() {
+  cat <<EOF
+Usage:
+  kupe                                    list all available profiles
+  kupe <profile name>                     switch to the <profile name>
+  kupe -                                  switch to the previous profile
+  kupe .                                  show the current profile name
+  kupe <options>
+Options:
+  -s, --switch <profile name>             switch to the <profile name>
+  -c, --current                           show the current profile name
+  -r, --rename <new name>                 rename the current profile
+  -r, --rename <profile name> <new name>  rename the given profile
+  -d, --delete                            delete the current profile
+  -d, --delete <profile name>             delete the <name> profile
+  -a, --add <config file> <profile name>  add config file as given profile name
+  -h, --help                              show the usage
+  -v, --version                           show the version info
+EOF
+}
+
+switch_profile() {
+  create_previous_sym_link "$CURRENT_PROFILE"
+  create_config_sym_link "$1"
+}
+
+switch_to_previous_profile() {
+  create_previous_sym_link "$CURRENT_PROFILE"
+  create_config_sym_link "$PREVIOUS_PROFILE"
+}
+
+main() {
+  get_current_profile
+  get_previous_profile
+
+  if [[ "$#" -eq 0 ]]; then
+    list_profiles
+  elif [[ "$1" == '.' || "$1" == '-c' || "$1" == '--current' ]]; then
+    show_current_profile
+  elif [[ "$1" == '-v' || "$1" == '--version' ]]; then
+    show_version
+  elif [[ "$1" == '-h' || "$1" == '--help' ]]; then
+    show_usage
+  elif [[ "$1" == '-' ]]; then
+    switch_to_previous_profile
+  elif [[ "$1" == '-s' || "$1" == '--switch' ]]; then
+    if [[ "$#" -gt 1 ]]; then
+      switch_profile "$2"
+    else
+      show_usage
+    fi
+  elif [[ "$1" == '-r' || "$1" == '--rename' ]]; then
+    if [[ "$#" -gt 2 ]]; then
+      rename_profile "$2" "$3"
+    elif [[ "$#" -gt 1 ]]; then
+      rename_current_profile "$2"
+    else
+      show_usage
+    fi
+  elif [[ "$1" == '-d' || "$1" == '--delete' ]]; then
+    if [[ "$#" -gt 1 ]]; then
+      delete_profile "$2"
+    else
+      delete_current_profile
+    fi
+  elif [[ "$1" == '-a' || "$1" == '--add' ]]; then
+    if [[ "$#" -gt 2 ]]; then
+      add_profile "$2" "$3"
+    else
+      show_usage
+    fi
+  elif [[ "$#" -gt 0 ]]; then
+    switch_profile "$1"
+  else
+    show_usage
+  fi
+}
+
+main "$@"

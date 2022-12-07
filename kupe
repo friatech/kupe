@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+KUBE_HOME="$HOME/.kube"
+
+if [ -z "$1" ]
+then
+  ACTIVE_PROFILE=$(stat "$KUBE_HOME/config" | grep File | sed -s 's/.*config\.//g')
+  echo "Active profile: $ACTIVE_PROFILE"
+elif [ -f "$KUBE_HOME/config.$1" ];
+then
+  ln -f -s "$KUBE_HOME/config.$1" config
+fi
